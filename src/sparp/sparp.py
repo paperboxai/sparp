@@ -1,13 +1,12 @@
 import asyncio
-import aiohttp
-import aiohttp.client_exceptions
-import time
 from typing import Dict, List, Iterator
-from aiohttp_retry import RetryClient, ExponentialRetry
 import time
-from aiohttp import TraceConfig
 import traceback
 import sys
+import aiohttp
+import aiohttp.client_exceptions
+from aiohttp_retry import RetryClient, ExponentialRetry
+from aiohttp import TraceConfig
 
 
 async def on_request_end(session, trace_config_ctx, params):
@@ -18,13 +17,14 @@ async def on_request_end(session, trace_config_ctx, params):
 
 def generate_on_request_start(attempts):
     async def on_request_start(session, trace_config_ctx, params) -> None:
-        current_attempt = trace_config_ctx.trace_request_ctx['current_attempt']
+        current_attempt = trace_config_ctx.trace_request_ctx["current_attempt"]
         attempts_left = attempts - current_attempt
         if current_attempt > 1 and attempts_left <= 2:
-
             print(
-                f"Retrying request, attempt number {current_attempt}, only {attempts_left} attempt(s) left")
+                f"Retrying request, attempt number {current_attempt}, only {attempts_left} attempt(s) left"
+            )
         trace_config_ctx.start = asyncio.get_event_loop().time()
+
     return on_request_start
 
 
@@ -88,17 +88,21 @@ class SharedMemory:
         else:
             percent = int(self.done / self.total * self.cols)
         remainder = self.cols - percent
-        full = ''.join(['=' for _ in range(percent)])
-        empty = ''.join([' 'for _ in range(remainder)])
+        full = "".join(["=" for _ in range(percent)])
+        empty = "".join([" " for _ in range(remainder)])
         full = full[:-1] + ">"
         end = self.print_options if not done else {}
         total = "?" if self.total == -1 else self.total
-        print(f"[{full}{empty}] {self.done}/{total}, success={self.success}, fail={self.fail},  took {round(elapsed, 2)}                            ", **end, flush=True)
+        print(
+            f"[{full}{empty}] {self.done}/{total}, success={self.success}, fail={self.fail},  took {round(elapsed, 2)}                            ",
+            **end,
+            flush=True,
+        )
 
 
 async def canceler(shared, source_semaphore, n_consumers):
     while True:
-        await asyncio.sleep(.1)
+        await asyncio.sleep(0.1)
         is_done = await shared.check_done()
         should_stop = await shared.get_should_stop()
         if is_done or should_stop:
@@ -107,7 +111,9 @@ async def canceler(shared, source_semaphore, n_consumers):
             break
 
 
-async def producer(items, source_queue, source_semaphore, time_between_requests, shared):
+async def producer(
+    items, source_queue, source_semaphore, time_between_requests, shared
+):
     total = 0
     for item in items:
         total += 1
@@ -117,7 +123,15 @@ async def producer(items, source_queue, source_semaphore, time_between_requests,
     await shared.set_total(total)
 
 
-async def consumer(source_queue, source_semaphore, sink_queue, session, shared, ok_status_codes, stop_on_first_fail):
+async def consumer(
+    source_queue,
+    source_semaphore,
+    sink_queue,
+    session,
+    shared,
+    ok_status_codes,
+    stop_on_first_fail,
+):
     while True:
         await source_semaphore.acquire()
         try:
@@ -136,17 +150,18 @@ async def consumer(source_queue, source_semaphore, sink_queue, session, shared, 
                 "text": response_text,
                 "status_code": status_code,
                 "json": json_,
-                "elapsed": response.elapsed
+                "elapsed": response.elapsed,
             }
-        except Exception as e:
+        except Exception:
             exc_info = sys.exc_info()
-            error_message = ''.join(traceback.format_exception(*exc_info))
-            response = {
-                "error_message": error_message
-            }
+            error_message = "".join(traceback.format_exception(*exc_info))
+            response = {"error_message": error_message}
 
         await sink_queue.put(response)
-        if "error_message" in response or response["status_code"] not in ok_status_codes:
+        if (
+            "error_message" in response
+            or response["status_code"] not in ok_status_codes
+        ):
             await shared.increment_fail()
             if stop_on_first_fail:
                 await shared.set_should_stop()
@@ -156,7 +171,7 @@ async def consumer(source_queue, source_semaphore, sink_queue, session, shared, 
 
 async def updater(shared):
     while True:
-        await asyncio.sleep(.3)
+        await asyncio.sleep(0.3)
         await shared.update()
         done = await shared.check_done()
         should_stop = await shared.get_should_stop()
@@ -166,7 +181,20 @@ async def updater(shared):
             break
 
 
-async def async_main(configs, source_queue, source_semaphore, sink_queue, shared, max_outstanding_requests, time_between_requests, ok_status_codes, stop_on_first_fail, retry_attempts, retry_status_codes, aiohttp_client_session_kwargs):
+async def async_main(
+    configs,
+    source_queue,
+    source_semaphore,
+    sink_queue,
+    shared,
+    max_outstanding_requests,
+    time_between_requests,
+    ok_status_codes,
+    stop_on_first_fail,
+    retry_attempts,
+    retry_status_codes,
+    aiohttp_client_session_kwargs,
+):
     trace_config = TraceConfig()
     trace_config.on_request_start.append(generate_on_request_start(retry_attempts))
     trace_config.on_request_end.append(on_request_end)
@@ -174,21 +202,33 @@ async def async_main(configs, source_queue, source_semaphore, sink_queue, shared
         attempts=retry_attempts,
         statuses=set(retry_status_codes),
         exceptions=[asyncio.exceptions.TimeoutError],
-        retry_all_server_errors=False
+        retry_all_server_errors=False,
     )
     async with RetryClient(
-            client_session=aiohttp.ClientSession(
-                trace_configs=[trace_config],
-                **aiohttp_client_session_kwargs
-            ),
-            retry_options=retry_options,
-            raise_for_status=False) as session:
-        consumers = [consumer(source_queue, source_semaphore, sink_queue, session, shared,
-                              ok_status_codes, stop_on_first_fail) for _ in range(max_outstanding_requests)]
+        client_session=aiohttp.ClientSession(
+            trace_configs=[trace_config], **aiohttp_client_session_kwargs
+        ),
+        retry_options=retry_options,
+        raise_for_status=False,
+    ) as session:
+        consumers = [
+            consumer(
+                source_queue,
+                source_semaphore,
+                sink_queue,
+                session,
+                shared,
+                ok_status_codes,
+                stop_on_first_fail,
+            )
+            for _ in range(max_outstanding_requests)
+        ]
         management_list = [
             updater(shared),
-            producer(configs, source_queue, source_semaphore, time_between_requests, shared),
-            canceler(shared, source_semaphore, max_outstanding_requests)
+            producer(
+                configs, source_queue, source_semaphore, time_between_requests, shared
+            ),
+            canceler(shared, source_semaphore, max_outstanding_requests),
         ]
         coros = management_list + consumers
         await asyncio.gather(*coros)
@@ -204,22 +244,18 @@ async def empty_full_queue(queue):
     return results
 
 
-async def async_sparp(configs, total, max_outstanding_requests, time_between_requests, ok_status_codes, stop_on_first_fail, disable_bar, attempts, retry_status_codes, aiohttp_client_session_kwargs, print_options):
-    source_queue = asyncio.Queue()
-    source_semaphore = asyncio.Semaphore(0)
-    sink_queue = asyncio.Queue()
-    shared = SharedMemory(total=total, disable_bar=disable_bar, print_options=print_options)
-    await async_main(
-        configs, source_queue, source_semaphore,
-        sink_queue, shared, max_outstanding_requests, time_between_requests,
-        ok_status_codes, stop_on_first_fail, attempts, retry_status_codes,
-        aiohttp_client_session_kwargs
-    )
-    result = await empty_full_queue(sink_queue)
-    return result
-
-
-def sparp(configs: Iterator[Dict], max_outstanding_requests: int, time_between_requests: float = 0., ok_status_codes=[200], stop_on_first_fail=False, disable_bar: bool = False, attempts: int = 1, retry_status_codes=[], aiohttp_client_session_kwargs={}, print_kwargs={"end": "\r"}) -> List:
+async def async_sparp(
+    configs: Iterator[Dict],
+    max_outstanding_requests: int,
+    time_between_requests: float = 0.0,
+    ok_status_codes=[200],
+    stop_on_first_fail=False,
+    disable_bar: bool = False,
+    attempts: int = 1,
+    retry_status_codes=[],
+    aiohttp_client_session_kwargs={},
+    print_kwargs={"end": "\r"},
+):
     """Simple Parallel Asynchronous Requests in Python
 
     Arguments:
@@ -231,7 +267,7 @@ def sparp(configs: Iterator[Dict], max_outstanding_requests: int, time_between_r
       disable_bar (bool): do not print anything
       attempts (int): number of times to try (at least 1)
       retry_status_codes (List[int]): status codes to retry
-      aiohttp_client_session_kwargs (Dict): additional kwargs to initialize aiohttp.ClientSession with 
+      aiohttp_client_session_kwargs (Dict): additional kwargs to initialize aiohttp.ClientSession with
       print_kwargs (Dict): additional kwargs to pass to `print`ing the progress bar
 
     Returns:
@@ -239,14 +275,74 @@ def sparp(configs: Iterator[Dict], max_outstanding_requests: int, time_between_r
     """
     if attempts < 1:
         raise ValueError("attempts should be at least 1")
-    if hasattr(configs, '__len__'):
+    if hasattr(configs, "__len__"):
         total = len(configs)
     else:
         total = -1
+    source_queue = asyncio.Queue()
+    source_semaphore = asyncio.Semaphore(0)
+    sink_queue = asyncio.Queue()
+    shared = SharedMemory(
+        total=total, disable_bar=disable_bar, print_options=print_kwargs
+    )
+    await async_main(
+        configs,
+        source_queue,
+        source_semaphore,
+        sink_queue,
+        shared,
+        max_outstanding_requests,
+        time_between_requests,
+        ok_status_codes,
+        stop_on_first_fail,
+        attempts,
+        retry_status_codes,
+        aiohttp_client_session_kwargs,
+    )
+    result = await empty_full_queue(sink_queue)
+    return result
+
+
+def sparp(
+    configs: Iterator[Dict],
+    max_outstanding_requests: int,
+    time_between_requests: float = 0.0,
+    ok_status_codes=[200],
+    stop_on_first_fail=False,
+    disable_bar: bool = False,
+    attempts: int = 1,
+    retry_status_codes=[],
+    aiohttp_client_session_kwargs={},
+    print_kwargs={"end": "\r"},
+) -> List:
+    """Simple Parallel Asynchronous Requests in Python
+
+    Arguments:
+      configs (List[Dict]): the request configurations. Each item in this list is fed roughly as such: [requests.request(**config) for config in configs]
+      max_outstanding_requests (int): max number of parallel requests alive at the same time
+      time_between_requests (float): minimum amount of time to wait before sending the next request
+      ok_status_codes (List[int]): list of status codes deemed "success"
+      stop_on_first_fail (bool): whether or not to stop sending requests if we get a status not in stop_on_first_fail
+      disable_bar (bool): do not print anything
+      attempts (int): number of times to try (at least 1)
+      retry_status_codes (List[int]): status codes to retry
+      aiohttp_client_session_kwargs (Dict): additional kwargs to initialize aiohttp.ClientSession with
+      print_kwargs (Dict): additional kwargs to pass to `print`ing the progress bar
+
+    Returns:
+      List: list of Responses
+    """
     coro = async_sparp(
-        configs, total, max_outstanding_requests, time_between_requests,
-        ok_status_codes, stop_on_first_fail, disable_bar, attempts, retry_status_codes,
-        aiohttp_client_session_kwargs, print_kwargs
+        configs=configs,
+        max_outstanding_requests=max_outstanding_requests,
+        time_between_requests=time_between_requests,
+        ok_status_codes=ok_status_codes,
+        stop_on_first_fail=stop_on_first_fail,
+        disable_bar=disable_bar,
+        attempts=attempts,
+        retry_status_codes=retry_status_codes,
+        aiohttp_client_session_kwargs=aiohttp_client_session_kwargs,
+        print_kwargs=print_kwargs,
     )
     results = asyncio.run(coro)
     return results
